@@ -11,9 +11,13 @@ Telegram bot ─┘                                                  └─> isl
 
 ## Kurulum (Windows)
 
-1. **Python 3.10+** kurun (python.org, kurulumda "Add to PATH" işaretli olsun).
+  **Dikkat** 
+  Repo'yu zip/rar olarak indirin. Kurulumu, Çalıştırmak istediğiniz alana dosya olarak çıkartın. Dosya manuel taşınacak olursa sistem hata verir.
+  Yaklaşık olarak 8 gb download ihtiyacı vardır.
+  
+1. Eğer yoksa, **Python 3.10+** kurun (python.org, kurulumda "Add to PATH" işaretli olsun).
 2. **Ollama** kurun (ollama.com/download).
-3. `kurulum.bat` dosyasına çift tıklayın (paketleri ve iki modeli indirir, bir kez yapılır).
+3. **DİKKAT!!! yönetici olarak çalıştırmayın.** `kurulum.bat` dosyasına çift tıklayın  (paketleri ve iki modeli indirir, bir kez yapılır).
 4. `.env` dosyasını Not Defteri ile açıp doldurun (aşağıya bakın).
 5. `baslat.bat` ile çalıştırın. Pencere açık kaldığı sürece ajan çalışır.
    Bilgisayar açılınca otomatik başlasın isterseniz `baslat.bat` kısayolunu
@@ -70,7 +74,7 @@ Yapay zeka hata yapabilir. Şüpheli kayıtlar işaretlenir ama işaretlenmeyen 
 
 ## Donanımınıza göre model
 
-RTX 4050 (6 GB VRAM) için varsayılanlar: `qwen2.5:7b` (metin PDF) ve `qwen2.5vl:3b` (fotoğraf/tarama).
+Test için kullanılan, RTX 4050 (6 GB VRAM) için varsayılanlar: `qwen2.5:7b` (metin PDF) ve `qwen2.5vl:3b` (fotoğraf/tarama).
 Fotoğraflarda doğruluk yetmezse `.env` içinde `GORSEL_MODEL=qwen2.5vl:7b` deneyin
 (önce `ollama pull qwen2.5vl:7b`); biraz daha yavaş ama daha doğru olur.
 Fatura başına tipik süre: metin PDF birkaç saniye, fotoğraf 10-40 sn.
