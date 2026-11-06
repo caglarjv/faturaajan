@@ -26,7 +26,9 @@ ALANLAR = {
     "satici_unvan": "string", "satici_vkn": "string", "satici_vergi_dairesi": "string",
     "alici_unvan": "string", "alici_vkn": "string", "alici_vergi_dairesi": "string",
     "para_birimi": "string", "matrah": "number", "kdv_orani": "number",
-    "kdv_tutari": "number", "genel_toplam": "number", "odeme_bilgisi": "string",
+    "kdv_tutari": "number", "vergiler_dahil_toplam": "number",
+    "tevkifat_orani": "string", "tevkifat_tutari": "number", "odenecek_tutar": "number",
+    "odeme_bilgisi": "string",
 }
 SEMA = {
     "type": "object",
@@ -43,7 +45,13 @@ Kurallar:
 - Vergi numarası 10 hane, TC kimlik numarası 11 hane; sadece rakam yaz. Vergi dairesi adını yaz.
 - Tutarlar sayı olsun (binlik ayracı yok, ondalık nokta). 
 - matrah = KDV hariç toplam (iskonto sonrası mal/hizmet tutarı). 
-- kdv_tutari = hesaplanan toplam KDV. genel_toplam = vergiler dahil ödenecek tutar.
+- kdv_tutari = HESAPLANAN toplam KDV (tevkifat düşülmeden önceki, tam KDV tutarı).
+- vergiler_dahil_toplam = 'Vergiler Dahil Toplam Tutar' (matrah + KDV, tevkifat düşülmeden).
+- KDV TEVKİFATI varsa (belgede 'Tevkifat', 'KDV Tevkifatı', 'Tevkifat Oranı', 'Tevkifat Tutarı' geçer):
+  tevkifat_orani = oran olduğu gibi (örn. 5/10 ya da 50), tevkifat_tutari = tevkif edilen KDV tutarı.
+  Tevkifat yoksa ikisini de null bırak. Tevkifat kodu veya açıklaması değil, ORAN ve TUTAR gerekli.
+- odenecek_tutar = faturanın en altındaki 'Ödenecek Tutar': tevkifat düşüldükten sonra satıcıya ödenecek net tutar.
+  Tevkifat yoksa vergiler_dahil_toplam ile aynıdır. İki tutarı birbirine karıştırma.
 - kdv_orani: tek oran varsa o (örn. 20); birden fazlaysa tutarı en yüksek olan.
 - para_birimi: TRY, USD, EUR gibi kod.
 - odeme_bilgisi: varsa IBAN veya ödeme şekli.
@@ -83,7 +91,7 @@ def _ollama(model, prompt, resimler=None):
 
 
 def _yeterli(d) -> bool:
-    return bool(d.get("fatura_no") or d.get("genel_toplam"))
+    return bool(d.get("fatura_no") or d.get("odenecek_tutar") or d.get("vergiler_dahil_toplam"))
 
 
 def cikar(yol: Path):

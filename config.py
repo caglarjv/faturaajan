@@ -29,6 +29,7 @@ METIN_MODELI = os.getenv("METIN_MODELI", "qwen2.5:7b")
 GORSEL_MODEL = os.getenv("GORSEL_MODEL", "qwen2.5vl:3b")
 
 KENDI_VKN = "".join(c for c in os.getenv("KENDI_VKN", "") if c.isdigit())
+KENDI_ANAHTAR = _liste(os.getenv("KENDI_ANAHTAR_KELIMELER"))
 KONTROL_ARALIGI = int(os.getenv("KONTROL_ARALIGI", "120"))
 
 GELEN = BASE / "gelen"

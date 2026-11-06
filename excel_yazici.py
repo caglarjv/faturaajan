@@ -1,6 +1,8 @@
 """Muhasebe şablonlu Excel dosyasını oluşturur ve kayıt ekler.
 Tek başına çalıştırırsanız (python excel_yazici.py) boş şablonu oluşturur.
-Eski kayıtlardaki arşiv yollarını tıklanabilir yapmak için: python excel_yazici.py --linkle"""
+Eski kayıtlardaki arşiv yollarını tıklanabilir yapmak için: python excel_yazici.py --linkle
+Eski kayıtlarda Yön'ü 'Alış' yapıp ters kalan tarafları düzeltmek için: python excel_yazici.py --yon-duzelt
+Eski Excel'i tevkifatlı yeni sütun düzenine taşımak için: python excel_yazici.py --sablon-yukselt (ajan başlarken kendisi de yapar)"""
 import datetime
 import re
 import sys
@@ -12,7 +14,8 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 
-from config import BASE, EXCEL_YOLU
+import validator
+from config import BASE, EXCEL_YOLU, KENDI_ANAHTAR, KENDI_VKN
 
 # (anahtar, başlık, genişlik, sayı biçimi)
 SUTUNLAR = [
@@ -32,8 +35,12 @@ SUTUNLAR = [
     ("para_birimi", "Para Birimi", 9, "@"),
     ("matrah", "Matrah (KDV Hariç)", 16, "#,##0.00"),
     ("kdv_orani", "KDV Oranı %", 10, "0"),
-    ("kdv_tutari", "KDV Tutarı", 14, "#,##0.00"),
-    ("genel_toplam", "Genel Toplam", 16, "#,##0.00"),
+    ("kdv_tutari", "KDV Tutarı (Tevkifat Öncesi)", 16, "#,##0.00"),
+    ("vergiler_dahil", "Vergiler Dahil Toplam", 16, "#,##0.00"),
+    ("tevkifat_var", "Tevkifatlı mı", 11, "@"),
+    ("tevkifat_orani", "Tevkifat Oranı", 11, "@"),
+    ("tevkifat_tutari", "KDV Tevkifat Tutarı", 16, "#,##0.00"),
+    ("genel_toplam", "Genel Toplam (Ödenecek)", 17, "#,##0.00"),
     ("odeme", "Ödeme / IBAN", 28, "@"),
     ("hesap_kodu", "Hesap Kodu (elle)", 14, "@"),
     ("kategori", "Gider/Gelir Kategorisi (elle)", 22, "@"),
@@ -101,7 +108,8 @@ def sablon_olustur(yol=EXCEL_YOLU):
         return (f'SUMIFS({F}${L(sutun)}:${L(sutun)},{F}${L("yon")}:${L("yon")},"{yon}",'
                 f'{yil},{pb}{ek})')
 
-    for i, b in enumerate(["Yön", "Fatura Adedi", "Matrah", "KDV", "Genel Toplam"], start=1):
+    for i, b in enumerate(["Yön", "Fatura Adedi", "Matrah", "KDV", "Genel Toplam (Ödenecek)",
+                           "KDV Tevkifatı"], start=1):
         c = oz.cell(row=4, column=i, value=b)
         c.font, c.fill = Font(bold=True, color="FFFFFF"), baslik_dolgu
     for r, yon in ((5, "Alış"), (6, "Satış")):
@@ -111,13 +119,14 @@ def sablon_olustur(yol=EXCEL_YOLU):
         oz.cell(row=r, column=3, value="=" + top("matrah", yon))
         oz.cell(row=r, column=4, value="=" + top("kdv_tutari", yon))
         oz.cell(row=r, column=5, value="=" + top("genel_toplam", yon))
+        oz.cell(row=r, column=6, value="=" + top("tevkifat_tutari", yon))
     oz["A7"], oz["D7"] = "Ödenecek (+) / Devreden (-) KDV", "=D6-D5"
     oz["A7"].font = oz["D7"].font = Font(bold=True)
     oz["A8"] = "Kontrol gerekli kayıt sayısı"
     oz["D8"] = f'=COUNTIF({F}${L("durum")}:${L("durum")},"Kontrol Gerekli")'
 
     for i, b in enumerate(["Dönem", "Alış Matrah", "Alış KDV", "Satış Matrah",
-                           "Satış KDV", "Ödenecek KDV"], start=1):
+                           "Satış KDV", "Ödenecek KDV", "Alış KDV Tevkifatı"], start=1):
         c = oz.cell(row=10, column=i, value=b)
         c.font, c.fill = Font(bold=True, color="FFFFFF"), baslik_dolgu
     for n in range(1, 13):
@@ -133,13 +142,14 @@ def sablon_olustur(yol=EXCEL_YOLU):
         oz.cell(row=r, column=4, value=aylik("matrah", "Satış"))
         oz.cell(row=r, column=5, value=aylik("kdv_tutari", "Satış"))
         oz.cell(row=r, column=6, value=f"=E{r}-C{r}")
-    for satir in oz.iter_rows(min_row=5, max_row=22, min_col=2, max_col=6):
+        oz.cell(row=r, column=7, value=aylik("tevkifat_tutari", "Alış"))
+    for satir in oz.iter_rows(min_row=5, max_row=22, min_col=2, max_col=7):
         for c in satir:
             c.number_format = "#,##0.00"
     for r in (5, 6):
         oz.cell(row=r, column=2).number_format = "0"
     oz["D8"].number_format = "0"
-    for col, gen in zip("ABCDEF", (34, 16, 16, 16, 16, 16)):
+    for col, gen in zip("ABCDEFG", (34, 16, 16, 16, 20, 18, 20)):
         oz.column_dimensions[col].width = gen
 
     # ---- Açıklama sayfası ----
@@ -151,7 +161,12 @@ def sablon_olustur(yol=EXCEL_YOLU):
         "Sarı satırlar 'Kontrol Gerekli' demektir: Kontrol Notu sütununu okuyup düzeltin,",
         "sonra Durum sütununu 'Düzeltildi' yapın.",
         "Hesap Kodu ve Kategori sütunlarını muhasebe için elle doldurun (ajan dokunmaz).",
-        "Yön: KENDI_VKN .env'de tanımlıysa Alış/Satış otomatik belirlenir.",
+        "GENEL TOPLAM (ÖDENECEK): faturanın en altındaki, KDV tevkifatı düşüldükten sonra ödenecek net tutardır.",
+        "Tevkifatlı faturada: KDV Tutarı tevkifat öncesi tam KDV, Vergiler Dahil Toplam = Matrah + KDV,",
+        "KDV Tevkifat Tutarı = tevkif edilen KDV, Genel Toplam = Vergiler Dahil Toplam − Tevkifat.",
+        "Bu üçü birbirini tutmazsa satır sarı olur (stopaj, damga vergisi vb. olabilir).",
+        "Yön: ajana gelen tüm faturalar gelen fatura olduğundan Yön her zaman 'Alış' yazılır.",
+        "KENDI_VKN .env'de tanımlıysa firmanız her zaman alıcı olarak kaydedilir.",
         "Özet sayfası: B1'deki yıl ve B2'deki para birimine göre otomatik toplar.",
         "UYARI: Ajan çalışırken Excel dosyası açıksa yazamaz; dosyayı kapatınca bekleyen",
         "faturalar bir sonraki turda otomatik işlenir.",
@@ -243,6 +258,110 @@ def eski_kayitlari_linkle() -> int:
     return adet
 
 
+def _beklenen_basliklar():
+    return [b for _k, b, _g, _f in SUTUNLAR]
+
+
+def sablon_kontrol() -> bool:
+    """Excel dosyası eski sütun düzenindeyse yeni düzene taşır (önce yedek alır).
+    Taşındıysa True, zaten günceldiyse False döndürür. Tanınmayan başlık varsa RuntimeError."""
+    wb = load_workbook(EXCEL_YOLU, read_only=True)
+    try:
+        mevcut = [c for c in next(wb["Faturalar"].iter_rows(min_row=1, max_row=1, values_only=True))]
+    finally:
+        wb.close()
+    mevcut = [m for m in mevcut if m is not None]
+    if mevcut == _beklenen_basliklar():
+        return False
+    sablon_yukselt()
+    return True
+
+
+def sablon_yukselt():
+    """Eski şablondaki tüm kayıtları (başlık adına göre) yeni şablona taşır. Yedek alır."""
+    import os
+    import shutil
+    alias = {"Genel Toplam": "genel_toplam", "KDV Tutarı": "kdv_tutari"}      # eski başlıklar
+    ad_anahtar = {b: k for k, b, _g, _f in SUTUNLAR}
+    ad_anahtar.update(alias)
+
+    wb_e = load_workbook(EXCEL_YOLU)
+    ws_e = wb_e["Faturalar"]
+    basliklar = [c.value for c in ws_e[1]]
+    bilinmeyen = [b for b in basliklar if b is not None and b not in ad_anahtar]
+    if bilinmeyen:
+        raise RuntimeError("Excel dosyasında tanınmayan sütun başlıkları var: "
+                           + ", ".join(map(str, bilinmeyen))
+                           + ". Otomatik taşıma yapılmadı; dosyayı kontrol edin.")
+    sutun_anahtar = {i: ad_anahtar[b] for i, b in enumerate(basliklar, start=1) if b is not None}
+    kayitlar = []
+    for r in range(2, ws_e.max_row + 1):
+        kayit = {anahtar: ws_e.cell(row=r, column=i).value for i, anahtar in sutun_anahtar.items()}
+        if kayit.get("kayit_no") is not None:
+            kayitlar.append(kayit)
+    ozet_yil = wb_e["Özet"]["B1"].value if "Özet" in wb_e.sheetnames else None
+    ozet_pb = wb_e["Özet"]["B2"].value if "Özet" in wb_e.sheetnames else None
+    wb_e.close()
+
+    yedek = EXCEL_YOLU.with_name(EXCEL_YOLU.stem + f".yedek-{datetime.datetime.now():%Y%m%d-%H%M%S}.xlsx")
+    shutil.copy2(EXCEL_YOLU, yedek)
+
+    gecici = EXCEL_YOLU.with_name(EXCEL_YOLU.stem + ".yeni.tmp.xlsx")
+    sablon_olustur(gecici)
+    wb = load_workbook(gecici)
+    ws = wb["Faturalar"]
+    for n, kayit in enumerate(kayitlar):
+        satir = 2 + n
+        for anahtar, _b, _g, fmt in SUTUNLAR:
+            c = ws.cell(row=satir, column=IDX[anahtar], value=kayit.get(anahtar))
+            c.number_format = fmt
+            if anahtar == "arsiv_yolu":
+                _linkle(c)
+    ws.auto_filter.ref = f"A1:{SON_SUTUN}{max(1 + len(kayitlar), 1)}"
+    if ozet_yil:
+        wb["Özet"]["B1"] = ozet_yil
+    if ozet_pb:
+        wb["Özet"]["B2"] = ozet_pb
+    wb.save(gecici)
+    os.replace(gecici, EXCEL_YOLU)
+    return yedek, len(kayitlar)
+
+
+def yon_duzelt(kendi_vkn: str = KENDI_VKN, anahtarlar=KENDI_ANAHTAR):
+    """Mevcut kayıtları onarır: Yön hep 'Alış' olur; firmanız satıcı sütunundaysa (vergi no ya da
+    unvandaki anahtar kelimeye göre) satıcı/alıcı bilgileri yer değiştirilir. Önce yedek alır.
+    (yedek_yolu, yonu_degisen, taraf_degisen) döndürür."""
+    import shutil
+    kendi_vkn = re.sub(r"\D", "", kendi_vkn or "")
+    if not kendi_vkn and not anahtarlar:
+        raise ValueError(".env içinde KENDI_VKN ve KENDI_ANAHTAR_KELIMELER boş. "
+                         "En az birini doldurun.")
+    cift = (("satici_unvan", "alici_unvan"), ("satici_vkn", "alici_vkn"), ("satici_vd", "alici_vd"))
+    wb = _ac()
+    ws = wb["Faturalar"]
+    yedek = EXCEL_YOLU.with_name(EXCEL_YOLU.stem + f".yedek-{datetime.datetime.now():%Y%m%d-%H%M%S}.xlsx")
+    shutil.copy2(EXCEL_YOLU, yedek)
+    yon_n = taraf_n = 0
+    for r in range(2, ws.max_row + 1):
+        if ws.cell(row=r, column=IDX["kayit_no"]).value is None:
+            continue
+        satir = {k: ws.cell(row=r, column=IDX[k2]).value for k, k2 in (
+            ("satici_vkn", "satici_vkn"), ("alici_vkn", "alici_vkn"),
+            ("satici_unvan", "satici_unvan"), ("alici_unvan", "alici_unvan"))}
+        sonuc, _ = validator.taraf_belirle(satir, kendi_vkn, anahtarlar)
+        if sonuc == "ters":
+            for x, y in cift:
+                hx, hy = ws.cell(row=r, column=IDX[x]), ws.cell(row=r, column=IDX[y])
+                hx.value, hy.value = hy.value, hx.value
+            taraf_n += 1
+        h = ws.cell(row=r, column=IDX["yon"])
+        if h.value != "Alış":
+            h.value = "Alış"
+            yon_n += 1
+    wb.save(EXCEL_YOLU)
+    return yedek, yon_n, taraf_n
+
+
 def ekle(kayit: dict) -> int:
     try:
         wb = _ac()
@@ -265,7 +384,26 @@ def ekle(kayit: dict) -> int:
 
 
 if __name__ == "__main__":
-    if "--linkle" in sys.argv:
+    if "--sablon-yukselt" in sys.argv:
+        try:
+            if sablon_kontrol():
+                print("Excel yeni sütun düzenine taşındı. Yedek aynı klasörde (.yedek-... .xlsx).")
+            else:
+                print("Excel zaten güncel düzende.")
+        except PermissionError:
+            print("Excel dosyası açık. Kapatıp komutu tekrar çalıştırın.")
+        except RuntimeError as e:
+            print(e)
+    elif "--yon-duzelt" in sys.argv:
+        try:
+            yedek, y, t = yon_duzelt()
+            print(f"Yedek alındı: {yedek.name}")
+            print(f"{y} satırın Yön değeri 'Alış' yapıldı, {t} satırda satıcı/alıcı yer değiştirildi.")
+        except PermissionError:
+            print("Excel dosyası açık. Kapatıp komutu tekrar çalıştırın.")
+        except ValueError as e:
+            print(e)
+    elif "--linkle" in sys.argv:
         try:
             print(f"{eski_kayitlari_linkle()} kayıt tıklanabilir yapıldı.")
         except PermissionError:
